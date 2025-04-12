@@ -3,34 +3,30 @@
 ## 1.O diagramă bloc cu toate componentele proiectului și cum sunt ele legate
 
 ```mermaid
-flowchart TB
-  USB-C -->|5V| Charger["Battery Charger (MCP73831)"]
-  Charger -->|Charging| LiPo["LiPo Battery (2500mAh)"]
-  LiPo --> LDO["3V3 LDO"]
-  
-  ESP32["ESP32-C6-WROOM-1"]
-  
-  LDO -->|3.3V| ESP32
-  LDO -->|3.3V| Display
-  LDO -->|3.3V| SDCard
-  LDO -->|3.3V| RTC
-  LDO -->|3.3V| BME688
-  LDO -->|3.3V| BatteryGauge
-  
-  ESP32 -- SPI --> Display["7.5 E-Ink Display (Waveshare WSH-13187)"]
-  ESP32 -- SPI --> SDCard["SD Card Connector"]
-  ESP32 -- GPIO --> Buttons["Buttons (3x)"]
-  ESP32 -- I2C --> BME688["Temp/Humidity Sensor (BME688)"]
-  ESP32 -- I2C --> BatteryGauge["Battery Fuel Gauge (MAX17048)"]
-  ESP32 -- I2C --> RTC["Real Time Clock (DS3231)"]
-  ESP32 -- USB --> USB-C
-  
-  LDO -->|3.3V| ESP32
-  LDO -->|3.3V| Display
-  LDO -->|3.3V| SDCard
-  LDO -->|3.3V| RTC
-  LDO -->|3.3V| BME688
-  LDO -->|3.3V| BatteryGauge
+graph TD
+    
+    USB["USB-C Connector(ESD Protection)"] -->|5V| CHG["Battery Charger (MCP73831)"]
+    CHG -->|Charging| BATT["Li-Po Battery (2500mAh)"]
+    BATT --> LDO["3.3V LDO Regulator (XC6220)"]
+
+    LDO -->|3.3V| ESP["ESP32-C6-WROOM-1(MCU)"]
+
+    ESP -- I2C --> RTC["Real Time Clock(DS3231)"]
+    ESP -- I2C --> BME["Environmental Sensor(BME688)"]
+    ESP -- I2C --> FUEL["Battery Fuel Gauge(MAX17048)"]
+    ESP -- I2C --> QWIIC["Qwiic / Stemma QT"]
+
+    ESP -- SPI --> FLASH["External NOR Flash(W25Q512)"]
+    ESP -- SPI --> SD["MicroSD Card Slot"]
+    ESP -- SPI --> EPD_HEADER["E-Paper Display Header"]
+
+    EPD_HEADER --> EPD_DRIVER["EPD Driver Circuit"]
+    EPD_DRIVER --> EPD_POW["EPD HV Power"]
+    LDO --> EPD_HEADER
+
+    ESP -- GPIO --> BUTTONS["3x Buttons:BOOT, CHANGE, RESET"]
+
+    USB -- USB D+/D- --> ESP
 ```
 ## 2. BOM-ul (coloanele cu N/A sunt duplicate ale unui tip de componentă și am pus date doar la prima apariție a acelui tip de componentă)
 
@@ -304,12 +300,44 @@ Integrează într-un singur cip mai multe tipuri de măsurători de mediu, util 
 | **BME688** (activ)        | ~3.6mA (peak) / 2.1µA (sleep)          |
 | **MAX17048** (fuel gauge) | ~50µA                                  |
 | **DS3231** (RTC)          | ~3.5mA (activ) / <1µA (back-up)        |
-| **MCP73831** (charger)    | Depinde de curentul de încărcare       |
+| **MCP73831** (charger)    | Consum diferit în funcție de curentul de încărcare:<br>- *500 mA* (standard)<br>- *1 A* (dacă design-ul suportă încărcare mai rapidă)       |
 
-În Deep Sleep (când e-reader-ul nu face nimic și are doar RTC și fuel gauge active), consumul total se poate reduce sub 50–100µA (principalul consumator rămânând RTC și circuitele de monitorizare).
-În Active + Wi-Fi (descărcare de e-book, refresh ecran etc.), consumul poate ajunge la 100–150mA.
+#### Mod Activ + Wi-Fi
 
-Cu o baterie de 2500mAh, în regim normal de utilizare (majoritatea timpului e inactiv, doar afișează static), se poate atinge o autonomie de câteva săptămâni, în funcție de frecvența refresh-urilor ecranului și a conectărilor Wi-Fi.
+- În timpul activării Wi-Fi (pentru descărcarea e-book-urilor sau actualizarea conținutului) și al refresh-ului ecranului e-paper, **consumul total** al sistemului (ESP32-C6 + e-paper + senzori) poate ajunge la **100–150 mA**.  
+- Această valoare **include** ESP32-C6 în mod Wi-Fi activ, senzori și curentul suplimentar de ~15–25 mA în timpul refresh-ului e-paper.
+
+#### Deep Sleep / Standby
+
+- **ESP32-C6** poate intra în deep sleep cu un consum de ordinul zecilor de microamperi (~70 µA dacă este bine optimizat și cu periferice oprite).  
+- Ceilalți senzori și componente pot fi dezactivați sau puși în moduri de consum redus, contribuind cu încă câțiva µA (RTC, fuel gauge etc.).  
+- Totalul în deep sleep poate fi menținut sub **100 µA** dacă sunt implementate corect modurile de consum redus pentru fiecare componentă.
+
+#### Exemplu de Calcul pentru Autonomie
+
+Cu o **baterie de 2500 mAh**, considerăm un ciclu de funcționare ipotetic:
+
+- **95% din timp** dispozitivul este în deep sleep (~70 µA).  
+- **5% din timp** este în mod activ (~120 mA), cu Wi-Fi pornit și e-paper folosit.  
+
+1. **Consum în deep sleep (95% din timp)**  
+     $I_{\mathrm{deep\_sleep}} = 70\,\mu A$
+   
+3. **Consum în mod activ (5% din timp)**  
+   $I_{\mathrm{activ}} \approx 120\,mA$
+
+4. **Media consumului orar**  
+   $I_{\mathrm{mediu}} = 0.95 \times 70\,\mu A + 0.05 \times 120\,mA = (0.95 \times 0.07\,mA) + (0.05 \times 120\,mA) = 0.0665\,mA + 6\,mA = \approx 6.07\,mA$
+
+5. **Autonomie teoretică**  
+   $\text{Autonomie} = \frac{Capacitatea\ Bateriei}{I_{\mathrm{mediu}}}
+     \approx \frac{2500\,mAh}{6.07\,mA} \approx 412\,ore \approx 17\,zile$
+
+Dacă mai optimizăm timpul activ (de exemplu, îl reducem la 2–3% din timp) sau scădem consumul de vârf, se poate ajunge la **3–4 săptămâni**. Totuși, în practică, autonomia depinde foarte mult de:
+
+- **Frecvența refresh-ului** e-paper  
+- **Durata și frecvența conexiunilor Wi-Fi**  
+- **Alți consumatori** (de ex. LED-uri de stare sau module suplimentare)
 
 ## 4. Descrieți în detaliu ce pini ai ESP32-C6 sunt folosiți pentru fiecare componentă și de ce
 
@@ -340,4 +368,4 @@ Cu o baterie de 2500mAh, în regim normal de utilizare (majoritatea timpului e i
 
 Design log-ul poate fi gasit pe [autodesk](https://a360.co/4kX1RTV)
 
-A fost un proiect foarte solicitant :))
+Exista o incompatibilitate intre .fbrd si .brd cand vine vorba de via stching. Am pus si fisierul .fbrd pentru a se oberva diferenta.
