@@ -369,3 +369,5 @@ Dacă mai optimizăm timpul activ (de exemplu, îl reducem la 2–3% din timp) s
 Design log-ul poate fi gasit pe [autodesk](https://a360.co/4kX1RTV)
 
 Exista o incompatibilitate intre .fbrd si .brd cand vine vorba de via stching. Am pus si fisierul .fbrd pentru a se oberva diferenta.
+
+Am decis sa redenumesc TP-urile pentru a fi mai usor de gestionat.
